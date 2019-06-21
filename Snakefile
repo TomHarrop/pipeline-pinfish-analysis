@@ -2,6 +2,8 @@
 import os
 from os import path
 
+singularity: 'shub://TomHarrop/singularity-containers:pinfish'
+
 configfile: "config.yml"
 workdir: path.join(config["workdir_top"], config["pipeline"])
 
@@ -13,13 +15,12 @@ include: "snakelib/utils.snake"
 rule dump_versions:
     output:
         ver = "versions.txt"
-    conda: "env.yml"
     shell:"""
     command -v conda > /dev/null && conda list > {output.ver}
-    echo -e "pinfish/spliced_bam2gff\t" `{SNAKEDIR}/pinfish/spliced_bam2gff/spliced_bam2gff -V` >> {output.ver}
-    echo -e "pinfish/cluster_gff\t" `{SNAKEDIR}/pinfish/cluster_gff/cluster_gff -V` >> {output.ver}
-    echo -e "pinfish/collapse_partials" `{SNAKEDIR}/pinfish/collapse_partials/collapse_partials -V` >> {output.ver}
-    echo -e "pinfish/polish_clusters" `{SNAKEDIR}/pinfish/polish_clusters/polish_clusters -V` >> {output.ver}
+    echo -e "pinfish/spliced_bam2gff\t" `spliced_bam2gff -V` >> {output.ver}
+    echo -e "pinfish/cluster_gff\t" `cluster_gff -V` >> {output.ver}
+    echo -e "pinfish/collapse_partials" `collapse_partials -V` >> {output.ver}
+    echo -e "pinfish/polish_clusters" `polish_clusters -V` >> {output.ver}
     """
 
 rule build_minimap_index: ## build minimap2 index
@@ -29,7 +30,6 @@ rule build_minimap_index: ## build minimap2 index
         index = "index/genome_index.mmi"
     params:
         opts = config["minimap_index_opts"]
-    conda: "env.yml"
     threads: config["threads"]
     shell:"""
         minimap2 -t {threads} {params.opts} -I 1000G -d {output.index} {input.genome}
@@ -44,7 +44,6 @@ rule map_reads: ## map reads using minimap2
     params:
         opts = config["minimap2_opts"],
         min_mq = config["minimum_mapping_quality"],
-    conda: "env.yml"
     threads: config["threads"]
     shell:"""
     minimap2 -t {threads} -ax splice {params.opts} {input.index} {input.fastq}\
@@ -57,12 +56,11 @@ rule convert_bam: ## convert BAM to GFF
         bam = rules.map_reads.output.bam
     output:
         raw_gff = "results/raw_transcripts.gff"
-    conda: "env.yml"
     params:
         opts = config["spliced_bam2gff_opts"]
     threads: config["threads"]
     shell:"""
-    {SNAKEDIR}/pinfish/spliced_bam2gff/spliced_bam2gff {params.opts} -t {threads} -M {input.bam} > {output.raw_gff}
+    spliced_bam2gff {params.opts} -t {threads} -M {input.bam} > {output.raw_gff}
     """
 
 rule cluster_gff: ## cluster transcripts in GFF
@@ -76,10 +74,9 @@ rule cluster_gff: ## cluster transcripts in GFF
         d = config["exon_boundary_tolerance"],
         e = config["terminal_exon_boundary_tolerance"],
         min_iso_frac = config["minimum_isoform_percent"],
-    conda: "env.yml"
     threads: config["threads"]
     shell:"""
-    {SNAKEDIR}/pinfish/cluster_gff/cluster_gff -p {params.min_iso_frac} -t {threads} -c {params.c} -d {params.d} -e {params.e} -a {output.cls_tab} {input.raw_gff} > {output.cls_gff}
+    cluster_gff -p {params.min_iso_frac} -t {threads} -c {params.c} -d {params.d} -e {params.e} -a {output.cls_tab} {input.raw_gff} > {output.cls_gff}
     """
 
 rule collapse_clustered: ## collapse clustered read artifacts
@@ -91,9 +88,8 @@ rule collapse_clustered: ## collapse clustered read artifacts
         d = config["collapse_internal_tol"],
         e = config["collapse_three_tol"],
         f = config["collapse_five_tol"],
-    conda: "env.yml"
     shell:"""
-    {SNAKEDIR}/pinfish/collapse_partials/collapse_partials -d {params.d} -e {params.e} -f {params.f} {input.cls_gff} > {output.cls_gff_col}
+    collapse_partials -d {params.d} -e {params.e} -f {params.f} {input.cls_gff} > {output.cls_gff_col}
     """
 
 rule polish_clusters: ## polish read clusters
@@ -105,10 +101,9 @@ rule polish_clusters: ## polish read clusters
         pol_trs = "results/polished_transcripts.fas",
     params:
         c = config["minimum_cluster_size"],
-    conda: "env.yml"
     threads: config["threads"]
     shell:"""
-    {SNAKEDIR}/pinfish/polish_clusters/polish_clusters -t {threads} -a {input.cls_tab} -c {params.c} -o {output.pol_trs} {input.bam}
+    polish_clusters -t {threads} -a {input.cls_tab} -c {params.c} -o {output.pol_trs} {input.bam}
     """
 
 rule map_polished: ## map polished transcripts to genome
@@ -119,7 +114,6 @@ rule map_polished: ## map polished transcripts to genome
        pol_bam = "alignments/polished_reads_aln_sorted.bam"
     params:
         extra = config["minimap2_opts_polished"]
-    conda: "env.yml"
     threads: config["threads"]
     shell:"""
     minimap2 -t {threads} {params.extra} -ax splice {input.index} {input.fasta}\
@@ -134,10 +128,9 @@ rule convert_polished: ## convert BAM of polished transcripts to GFF
         pol_gff = "results/polished_transcripts.gff"
     params:
         extra = config["spliced_bam2gff_opts_pol"]
-    conda: "env.yml"
     threads: config["threads"]
     shell:"""
-    {SNAKEDIR}/pinfish/spliced_bam2gff/spliced_bam2gff {params.extra} -t {threads} -M {input.bam} > {output.pol_gff}
+    spliced_bam2gff {params.extra} -t {threads} -M {input.bam} > {output.pol_gff}
     """
 
 rule collapse_polished: ## collapse polished read artifacts
@@ -149,9 +142,8 @@ rule collapse_polished: ## collapse polished read artifacts
         d = config["collapse_internal_tol"],
         e = config["collapse_three_tol"],
         f = config["collapse_five_tol"],
-    conda: "env.yml"
     shell:"""
-    {SNAKEDIR}/pinfish/collapse_partials/collapse_partials -d {params.d} -e {params.e} -f {params.f} {input.pol_gff} > {output.pol_gff_col}
+    collapse_partials -d {params.d} -e {params.e} -f {params.f} {input.pol_gff} > {output.pol_gff_col}
     """
 
 rule gen_corr_trs: ## Generate corrected transcriptome.
@@ -160,7 +152,6 @@ rule gen_corr_trs: ## Generate corrected transcriptome.
         gff = rules.collapse_polished.output.pol_gff_col,
     output:
         fasta = "results/corrected_transcriptome_polished_collapsed.fas"
-    conda: "env.yml"
     shell:"""
     gffread -g {input.genome} -w {output.fasta} {input.gff}
     """
